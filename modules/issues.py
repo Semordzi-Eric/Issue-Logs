@@ -6,7 +6,7 @@ from utils.styling import render_status_badge
 
 CATEGORIES = [
     "Revenue Leakage", "Failed Transactions", "Suspicious Activity",
-    "Reversals", "System Errors", "Others"
+    "Reversals", "Reprocessed", "System Errors", "Others"
 ]
 
 PRIORITIES = ["Low", "Medium", "High", "Critical"]
