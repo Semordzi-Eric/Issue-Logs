@@ -13,43 +13,60 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Apply dark mode styles
 apply_custom_css()
 
-# Import modules
 from modules.dashboard import render_dashboard
 from modules.issues import render_add_issue, render_manage_issues
 from modules.emails import render_email_tracker
 from modules.reports import render_reports
 
+PAGES = [
+    "📊 Dashboard Overview",
+    "📝 Log New Issue",
+    "🔍 Manage Issues",
+    "📧 Email Tracker",
+    "📄 Generative Reports"
+]
 
 def main():
+    # ── Support programmatic navigation via session state ──
+    if "nav_page" not in st.session_state:
+        st.session_state.nav_page = PAGES[0]
+
     with st.sidebar:
         st.markdown("## 🛡️ Audit Hub v1.0")
         st.markdown("---")
 
-        # Navigation
-        choice = st.radio("Navigation", [
-            "📊 Dashboard Overview",
-            "📝 Log New Issue",
-            "🔍 Manage Issues",
-            "📧 Email Tracker",
-            "📄 Generative Reports"
-        ])
+        # Sync radio to session state so external buttons can drive navigation
+        current_index = PAGES.index(st.session_state.nav_page) \
+            if st.session_state.nav_page in PAGES else 0
+
+        choice = st.radio(
+            "Navigation",
+            PAGES,
+            index=current_index,
+            key="sidebar_nav"
+        )
+
+        # Keep session state in sync with sidebar clicks
+        if choice != st.session_state.nav_page:
+            st.session_state.nav_page = choice
+            st.rerun()
 
         st.markdown("---")
         st.caption("Log issues, track emails, and auto-generate executive summary reports.")
 
-    # Routing
-    if choice == "📊 Dashboard Overview":
+    # ── Routing ──
+    page = st.session_state.nav_page
+    if page == "📊 Dashboard Overview":
         render_dashboard()
-    elif choice == "📝 Log New Issue":
+    elif page == "📝 Log New Issue":
         render_add_issue()
-    elif choice == "🔍 Manage Issues":
+    elif page == "🔍 Manage Issues":
         render_manage_issues()
-    elif choice == "📧 Email Tracker":
+    elif page == "📧 Email Tracker":
         render_email_tracker()
-    elif choice == "📄 Generative Reports":
+    elif page == "📄 Generative Reports":
         render_reports()
 
 
