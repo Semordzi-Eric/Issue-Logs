@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from database.models import get_session, Issue, EmailLog
+from database.models import get_session, Issue, EmailLog, get_setting
 
 def render_dashboard():
     st.title("📊 Audit & Revenue Assurance Dashboard")
@@ -11,6 +11,9 @@ def render_dashboard():
     issues = session.query(Issue).all()
     emails = session.query(EmailLog).all()
     session.close()
+
+    last_sync = get_setting("last_sync_time", "Never")
+    st.caption(f"☁️ **Last Cloud Sync:** {last_sync}")
 
     if not issues:
         st.info("No audit logs found. Start by adding an issue in the **Log New Issue** tab.")

@@ -4,7 +4,7 @@ import os
 import json
 import streamlit as st
 import datetime
-from database.models import get_setting
+from database.models import get_setting, set_setting
 
 # Scopes required for Google Sheets API
 SCOPES = [
@@ -20,42 +20,48 @@ class SheetsSync:
         self.spreadsheet = None
 
     def connect(self):
-        """ESTABLISH CONNECTION TO GOOGLE SHEETS."""
-        creds = None
-        
-        # 1. Check Streamlit Secrets (Recommended for Cloud Deployment)
+        """Authenticate and connect to the spreadsheet."""
+        if not self.sheet_id: return False
         try:
-            if "gcp_service_account" in st.secrets:
-                creds_info = st.secrets["gcp_service_account"]
-                if isinstance(creds_info, str):
-                    creds_info = json.loads(creds_info)
-                creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
-        except Exception:
-            # Fallback for local dev if secrets.toml doesn't exist or other error
-            pass
-        
-        # 2. Fallback to Local JSON File (Recommended for Local Dev)
-        if not creds and os.path.exists(self.credentials_path):
+            creds = None
+            # Prioritize Streamlit Secrets
             try:
-                creds = Credentials.from_service_account_file(self.credentials_path, scopes=SCOPES)
-            except Exception as e:
-                st.error(f"❌ Google Sheets: Error reading {self.credentials_path}: {e}")
-
-        if not creds:
-            st.warning(f"⚠️ Google Sheets Sync: No credentials found (check Secrets or `{self.credentials_path}`). Sync disabled.")
-            return False
+                if "gcp_service_account" in st.secrets:
+                    creds_info = json.loads(st.secrets["gcp_service_account"], strict=False)
+                    creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+            except: pass
             
-        if not self.sheet_id:
-            st.warning("⚠️ Google Sheets Sync: Spreadsheet ID not configured. Sync disabled.")
-            return False
-
-        try:
+            # Fallback to local file
+            if not creds and os.path.exists(self.credentials_path):
+                creds = Credentials.from_service_account_file(self.credentials_path, scopes=SCOPES)
+            
+            if not creds: return False
+            
             self.client = gspread.authorize(creds)
             self.spreadsheet = self.client.open_by_key(self.sheet_id)
+            self.ensure_headers() # Validate structure on connect
             return True
         except Exception as e:
-            st.error(f"❌ Google Sheets Connection Error: {str(e)}")
+            st.error(f"Google Sheets Sync Error: {e}")
             return False
+
+    def ensure_headers(self):
+        """Ensure all required sheets and headers exist in the spreadsheet."""
+        required = {
+            "Issues": ["ID", "Issue ID", "Date", "Title", "Description", "Category", "Priority", "System", "Transaction ID", "Amount", "Root Cause", "Status"],
+            "Email Logs": ["ID", "Issue ID", "Date Sent", "Recipient", "Subject", "Status", "Follow-up", "Summary"],
+            "Responses": ["ID", "Email Log ID", "Issue ID", "Date", "Direction", "From/To", "Summary"]
+        }
+        for name, headers in required.items():
+            try:
+                ws = self.spreadsheet.worksheet(name)
+                # Check if first row matches headers
+                first_row = ws.row_values(1)
+                if not first_row:
+                    ws.append_row(headers)
+            except gspread.exceptions.WorksheetNotFound:
+                ws = self.spreadsheet.add_worksheet(title=name, rows="100", cols=str(len(headers)))
+                ws.append_row(headers)
 
     def _get_or_create_worksheet(self, title, headers):
         """Get an existing worksheet or create it with headers if not found."""
@@ -69,18 +75,16 @@ class SheetsSync:
         return sheet
 
     def sync_issue(self, issue, action="INSERT"):
-        """Sync a single issue to the 'Issues' tab."""
+        """Sync an issue record to the 'Issues' sheet."""
         if not self.connect(): return
-
-        headers = [
-            "ID", "Issue ID", "Date", "Title", "Category", 
-            "Priority", "System", "Status", "Amount", "Root Cause"
-        ]
-        sheet = self._get_or_create_worksheet("Issues", headers)
+        try:
+            sheet = self.spreadsheet.worksheet("Issues")
+        except: return
         
         row_data = [
-            issue.id, issue.issue_id, str(issue.date), issue.title, issue.category,
-            issue.priority, issue.affected_system, issue.status, issue.amount or 0, issue.root_cause or ""
+            issue.id, issue.issue_id, str(issue.date), issue.title, issue.description or "", 
+            issue.category, issue.priority, issue.affected_system, 
+            issue.transaction_id or "", issue.amount or 0, issue.root_cause or "", issue.status
         ]
 
         if action == "INSERT":
@@ -89,7 +93,7 @@ class SheetsSync:
             try:
                 cell = sheet.find(str(issue.issue_id), in_column=2)
                 if cell:
-                    sheet.update(f"A{cell.row}:J{cell.row}", [row_data])
+                    sheet.update(f"A{cell.row}:L{cell.row}", [row_data])
                 else:
                     sheet.append_row(row_data)
             except gspread.exceptions.CellNotFound:
@@ -123,29 +127,30 @@ class SheetsSync:
                 pass
 
     def sync_email(self, email, issue_id_str, action="INSERT"):
-        """Sync an email log to the 'Email Logs' tab."""
+        """Sync an email log (and its responses if deleting) to the 'Email Logs' sheet."""
         if not self.connect(): return
-
-        headers = ["ID", "Issue ID", "Date Sent", "Recipient", "Subject", "Status", "Follow-up", "Summary"]
-        sheet = self._get_or_create_worksheet("Email Logs", headers)
+        try:
+            sheet = self.spreadsheet.worksheet("Email Logs")
+        except: return
         
-        row_data = [
-            email.id, issue_id_str, str(email.date_sent), email.recipient, 
-            email.subject, email.response_status, str(email.follow_up_date or ""), email.email_summary
-        ]
-
         if action == "INSERT":
+            row_data = [
+                email.id, issue_id_str, str(email.date_sent), 
+                email.recipient, email.subject, email.response_status,
+                str(email.follow_up_date) if email.follow_up_date else "",
+                email.email_summary
+            ]
             sheet.append_row(row_data)
         elif action == "UPDATE":
             try:
-                # Find by local ID (column 1)
                 cell = sheet.find(str(email.id), in_column=1)
                 if cell:
-                    sheet.update(f"A{cell.row}:H{cell.row}", [row_data])
-                else:
-                    sheet.append_row(row_data)
+                    # Update status and follow-up (cols 6 and 7)
+                    sheet.update_cell(cell.row, 6, email.response_status)
+                    sheet.update_cell(cell.row, 7, str(email.follow_up_date) if email.follow_up_date else "")
             except gspread.exceptions.CellNotFound:
-                sheet.append_row(row_data)
+                # If not found, insert as fallback
+                self.sync_email(email, issue_id_str, action="INSERT")
         elif action == "DELETE":
             try:
                 # 1. Delete Email Log
@@ -165,18 +170,17 @@ class SheetsSync:
                 pass
 
     def sync_response(self, response, issue_id_str, action="INSERT"):
-        """Sync an email response to the 'Responses' tab."""
+        """Sync an email response to the 'Responses' sheet."""
         if not self.connect(): return
-
-        headers = ["ID", "Email Log ID", "Issue ID", "Date", "Direction", "From/To", "Summary"]
-        sheet = self._get_or_create_worksheet("Responses", headers)
+        try:
+            sheet = self.spreadsheet.worksheet("Responses")
+        except: return
         
-        row_data = [
-            response.id, response.email_log_id, issue_id_str, str(response.date), 
-            response.direction, response.from_to, response.summary
-        ]
-
         if action == "INSERT":
+            row_data = [
+                response.id, response.email_log_id, issue_id_str,
+                str(response.date), response.direction, response.from_to, response.summary
+            ]
             sheet.append_row(row_data)
 
     def pull_all_data(self):
@@ -185,17 +189,23 @@ class SheetsSync:
         
         data = {"issues": [], "emails": [], "responses": []}
         
+        # Helper to safely parse dates
+        def safe_date(val):
+            if not val or val == "": return None
+            try:
+                # If already a date object (less likely from get_all_records but safe)
+                if isinstance(val, (datetime.date, datetime.datetime)):
+                    return val.date() if isinstance(val, datetime.datetime) else val
+                return datetime.datetime.strptime(str(val), "%Y-%m-%d").date()
+            except:
+                return None
+
         # 1. Pull Issues
         try:
             issues_sheet = self.spreadsheet.worksheet("Issues")
             rows = issues_sheet.get_all_records()
             for r in rows:
-                # Handle types
-                if r.get("Date"):
-                    # Cast string '2025-03-31' to date object
-                    try:
-                        r["Date"] = datetime.datetime.strptime(str(r["Date"]), "%Y-%m-%d").date()
-                    except: pass
+                r["Date"] = safe_date(r.get("Date"))
                 data["issues"].append(r)
         except gspread.exceptions.WorksheetNotFound: pass
 
@@ -204,14 +214,8 @@ class SheetsSync:
             emails_sheet = self.spreadsheet.worksheet("Email Logs")
             rows = emails_sheet.get_all_records()
             for r in rows:
-                if r.get("Date Sent"):
-                    try:
-                        r["Date Sent"] = datetime.datetime.strptime(str(r["Date Sent"]), "%Y-%m-%d").date()
-                    except: pass
-                if r.get("Follow-up") and r["Follow-up"] != "":
-                    try:
-                        r["Follow-up"] = datetime.datetime.strptime(str(r["Follow-up"]), "%Y-%m-%d").date()
-                    except: pass
+                r["Date Sent"] = safe_date(r.get("Date Sent"))
+                r["Follow-up"] = safe_date(r.get("Follow-up"))
                 data["emails"].append(r)
         except gspread.exceptions.WorksheetNotFound: pass
 
@@ -220,13 +224,12 @@ class SheetsSync:
             resp_sheet = self.spreadsheet.worksheet("Responses")
             rows = resp_sheet.get_all_records()
             for r in rows:
-                if r.get("Date"):
-                    try:
-                        r["Date"] = datetime.datetime.strptime(str(r["Date"]), "%Y-%m-%d").date()
-                    except: pass
+                r["Date"] = safe_date(r.get("Date"))
                 data["responses"].append(r)
         except gspread.exceptions.WorksheetNotFound: pass
         
+        # Record sync time for Dashboard
+        set_setting("last_sync_time", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         return data
 
     def full_sync(self, all_issues, all_emails, all_responses, issue_map):
@@ -234,23 +237,31 @@ class SheetsSync:
         if not self.connect(): return
 
         # Issues
-        issues_sheet = self._get_or_create_worksheet("Issues", ["ID", "Issue ID", "Date", "Title", "Category", "Priority", "System", "Status", "Amount", "Root Cause"])
+        issues_headers = ["ID", "Issue ID", "Date", "Title", "Description", "Category", "Priority", "System", "Transaction ID", "Amount", "Root Cause", "Status"]
+        issues_sheet = self.spreadsheet.worksheet("Issues")
         issues_sheet.clear()
-        issues_sheet.append_row(["ID", "Issue ID", "Date", "Title", "Category", "Priority", "System", "Status", "Amount", "Root Cause"])
-        issue_rows = [[i.id, i.issue_id, str(i.date), i.title, i.category, i.priority, i.affected_system, i.status, i.amount or 0, i.root_cause or ""] for i in all_issues]
+        issues_sheet.append_row(issues_headers)
+        issue_rows = [
+            [i.id, i.issue_id, str(i.date), i.title, i.description or "", 
+             i.category, i.priority, i.affected_system, 
+             i.transaction_id or "", i.amount or 0, i.root_cause or "", i.status] 
+            for i in all_issues
+        ]
         if issue_rows: issues_sheet.append_rows(issue_rows)
 
         # Email Logs
-        emails_sheet = self._get_or_create_worksheet("Email Logs", ["ID", "Issue ID", "Date Sent", "Recipient", "Subject", "Status", "Follow-up", "Summary"])
+        emails_headers = ["ID", "Issue ID", "Date Sent", "Recipient", "Subject", "Status", "Follow-up", "Summary"]
+        emails_sheet = self.spreadsheet.worksheet("Email Logs")
         emails_sheet.clear()
-        emails_sheet.append_row(["ID", "Issue ID", "Date Sent", "Recipient", "Subject", "Status", "Follow-up", "Summary"])
+        emails_sheet.append_row(emails_headers)
         email_rows = [[e.id, issue_map.get(e.issue_id, "N/A"), str(e.date_sent), e.recipient, e.subject, e.response_status, str(e.follow_up_date or ""), e.email_summary] for e in all_emails]
         if email_rows: emails_sheet.append_rows(email_rows)
 
         # Responses
-        resp_sheet = self._get_or_create_worksheet("Responses", ["ID", "Email Log ID", "Issue ID", "Date", "Direction", "From/To", "Summary"])
+        resp_headers = ["ID", "Email Log ID", "Issue ID", "Date", "Direction", "From/To", "Summary"]
+        resp_sheet = self.spreadsheet.worksheet("Responses")
         resp_sheet.clear()
-        resp_sheet.append_row(["ID", "Email Log ID", "Issue ID", "Date", "Direction", "From/To", "Summary"])
+        resp_sheet.append_row(resp_headers)
         resp_rows = []
         for r in all_responses:
             resp_rows.append([r.id, r.email_log_id, issue_map.get(r.email_log_id, "N/A"), str(r.date), r.direction, r.from_to, r.summary])

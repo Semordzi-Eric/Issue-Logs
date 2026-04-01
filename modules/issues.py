@@ -458,14 +458,12 @@ def render_manage_issues():
     confirm = st.checkbox(f"I confirm: permanently delete **{selected_id}** and all its data.")
     if st.button("🗑️ Delete Issue", type="primary", disabled=not confirm):
         with st.spinner("Deleting..."):
-            linked = session.query(EmailLog).filter_by(issue_id=target.id).all()
-            for em in linked:
-                session.query(EmailResponse).filter_by(email_log_id=em.id).delete()
-                session.delete(em)
+            # 1. Sheets Sync first (Cascading delete in cloud)
+            get_sheets_sync().sync_issue(target, action="DELETE")
+            
+            # 2. Local Delete (SQLAlchemy Cascades handle EmailLogs and Responses)
             session.delete(target)
             session.commit()
-            # ── Google Sheets Sync ──
-            get_sheets_sync().sync_issue(target, action="DELETE")
         st.success(f"🗑️ Issue {selected_id} deleted.")
         st.toast("Issue deleted", icon="🗑️")
         st.rerun()

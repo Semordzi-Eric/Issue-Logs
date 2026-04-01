@@ -469,25 +469,33 @@ def render_email_tracker():
                 else:
                     with st.spinner("Saving response..."):
                         eid = email_map[selected_label]
-                        session.add(EmailResponse(
+                        new_resp = EmailResponse(
                             email_log_id=eid,
                             date=resp_date,
                             direction=direction,
                             from_to=from_to.strip(),
                             summary=resp_summary.strip()
-                        ))
+                        )
+                        session.add(new_resp)
+                        
                         parent = session.query(EmailLog).filter_by(id=eid).first()
                         if parent:
                             parent.response_status = new_status
                             session.commit()
+                            
+                            # Get the Issue ID string from the linked relationship
+                            # This is 100% robust compared to parsing the dropdown label
+                            issue_id_str = "N/A"
+                            if parent.issue:
+                                issue_id_str = parent.issue.issue_id
+
                             # ── Sync Email Record (Update Status) ──
-                            issue_id_str = selected_label.split("]")[0][1:]
                             get_sheets_sync().sync_email(parent, issue_id_str, action="UPDATE")
-                        
-                        # Sync to Google Sheets (The response itself)
-                        new_resp = session.query(EmailResponse).order_by(EmailResponse.id.desc()).first()
-                        if new_resp:
-                            get_sheets_sync().sync_response(new_resp, selected_label.split("]")[0][1:], action="INSERT")
+                            
+                            # ── Sync the Response itself ──
+                            # Re-flush to get the new response ID
+                            session.flush()
+                            get_sheets_sync().sync_response(new_resp, issue_id_str, action="INSERT")
                     # Store confirmation, bump key to clear form
                     st.session_state.last_resp_saved = {
                         "direction": direction,
@@ -549,16 +557,19 @@ def render_email_tracker():
                     if st.button(lbl, key=f"qresp_{e.id}", use_container_width=True,
                                  help=f"{e.subject} → {e.recipient}"):
                         with st.spinner("Updating..."):
-                            e_obj = session.query(EmailLog).filter_by(id=e.id).first()
+                            e_obj = session.query(EmailLog).get(e.id)
                             if e_obj:
                                 e_obj.response_status = "Responded"
                                 session.commit()
-                        st.toast("Marked as Responded!", icon="✅")
-                        # Sync email log update here
-                        e_obj = session.query(EmailLog).filter_by(id=e.id).first()
-                        if e_obj:
-                            get_sheets_sync().sync_email(e_obj, e['Issue ID'], action="UPDATE")
-                        st.rerun()
+                                
+                                # Sync update to Sheets
+                                issue_id_str = "N/A"
+                                if e_obj.issue:
+                                    issue_id_str = e_obj.issue.issue_id
+                                
+                                get_sheets_sync().sync_email(e_obj, issue_id_str, action="UPDATE")
+                                st.toast("Marked as Responded!", icon="✅")
+                                st.rerun()
 
             st.download_button(
                 "📥 Export Pending Follow-ups (CSV)",
@@ -593,10 +604,16 @@ def render_email_tracker():
 
             if st.button("🗑️ Delete", type="primary", disabled=not confirm):
                 with st.spinner("Deleting..."):
-                    target = session.query(EmailLog).filter_by(id=del_map[del_label]).first()
+                    target = session.query(EmailLog).get(del_map[del_label])
                     if target:
-                        issue_id_str = issue_dict.get(target.issue_id).issue_id if issue_dict.get(target.issue_id) else "N/A"
+                        issue_id_str = "N/A"
+                        if target.issue:
+                            issue_id_str = target.issue.issue_id
+                        
+                        # Sheets Sync first
                         get_sheets_sync().sync_email(target, issue_id_str, action="DELETE")
+                        
+                        # Local delete (cascades handle responses)
                         session.delete(target)
                         session.commit()
                 st.success("🗑️ Email log and all responses deleted.")

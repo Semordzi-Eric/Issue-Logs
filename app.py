@@ -59,27 +59,54 @@ def main():
                         st.toast("✅ Synced with Cloud Database", icon="☁️")
                 except Exception as e:
                     st.error(f"⚠️ Bootstrap Sync Failed: {e}")
-
+                    st.info("Check your Sheet ID and Credentials in Settings.")
     # ── Support programmatic navigation via session state ──
     if "nav_page" not in st.session_state:
         st.session_state.nav_page = PAGES[0]
 
+    # ── Sidebar ──
     with st.sidebar:
         st.markdown("## 🛡️ Audit Hub v1.0")
         st.markdown("---")
 
-        # Sync radio to session state so external buttons can drive navigation
+        # ── Cloud Sync Status & Actions ──
+        st.markdown("### ☁️ Cloud Sync")
+        if gs_id:
+            last_sync = get_setting("last_sync_time", "Never")
+            st.caption(f"**Status:** Connected ✅")
+            st.caption(f"**Last Sync:** {last_sync}")
+            
+            # Auto-trigger if empty
+            session = get_session()
+            issue_count = session.query(Issue).count()
+            session.close()
+
+            if issue_count == 0 and "gs_bootstrapped" not in st.session_state:
+                st.info("Empty database detected. Auto-syncing...")
+                st.session_state.gs_bootstrapped = True # prevent loop
+                st.rerun()
+
+            if st.button("📥 Sync Data from Cloud", use_container_width=True, help="Pull latest data from Google Sheets"):
+                with st.spinner("Syncing..."):
+                    try:
+                        sync = get_sheets_sync()
+                        data = sync.pull_all_data()
+                        if data:
+                            reload_from_sheets_data(data)
+                            st.toast("✅ Cloud Data Pulled!", icon="☁️")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Sync Failed: {e}")
+        else:
+            st.warning("⚠️ Cloud Sync Disabled. Configure your Sheet ID in Settings.")
+        
+        st.markdown("---")
+
+        # Navigation
         current_index = PAGES.index(st.session_state.nav_page) \
             if st.session_state.nav_page in PAGES else 0
-
-        choice = st.radio(
-            "Navigation",
-            PAGES,
-            index=current_index,
-            key="sidebar_nav"
-        )
-
-        # Keep session state in sync with sidebar clicks
+        
+        choice = st.radio("Navigation", PAGES, index=current_index, key="sidebar_nav")
         if choice != st.session_state.nav_page:
             st.session_state.nav_page = choice
             st.rerun()

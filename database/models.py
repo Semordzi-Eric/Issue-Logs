@@ -21,7 +21,8 @@ class Issue(Base):
     status = Column(String, nullable=False, default='Open')
     resolution_notes = Column(Text, nullable=True)
     
-    emails = relationship("EmailLog", back_populates="issue")
+    emails = relationship("EmailLog", back_populates="issue", 
+                          cascade="all, delete-orphan")
 
 class EmailLog(Base):
     __tablename__ = 'email_logs'
@@ -38,7 +39,8 @@ class EmailLog(Base):
     
     issue = relationship("Issue", back_populates="emails")
     responses = relationship("EmailResponse", back_populates="email_log",
-                             order_by="EmailResponse.date", cascade="all, delete-orphan")
+                             order_by="EmailResponse.date", 
+                             cascade="all, delete-orphan")
 
 class EmailResponse(Base):
     __tablename__ = 'email_responses'
@@ -104,42 +106,38 @@ def reload_from_sheets_data(data):
         for r in data.get("issues", []):
             new_i = Issue(
                 id=r.get("ID"),
-                issue_id=r.get("Issue ID"),
+                issue_id=r.get("Issue ID") or f"TEMP-{r.get('ID')}",
                 date=r.get("Date"),
-                title=r.get("Title"),
-                description=r.get("Description", ""), # Handle potential missing field
-                category=r.get("Category"),
-                priority=r.get("Priority"),
-                affected_system=r.get("System"),
-                transaction_id=r.get("Transaction ID"),
-                amount=r.get("Amount"),
-                root_cause=r.get("Root Cause"),
-                status=r.get("Status")
+                title=r.get("Title") or "Untitled Issue",
+                description=r.get("Description") or "",
+                category=r.get("Category") or "Other",
+                priority=r.get("Priority") or "Medium",
+                affected_system=r.get("System") or "Unknown",
+                transaction_id=str(r.get("Transaction ID", "")),
+                amount=r.get("Amount") if isinstance(r.get("Amount"), (int, float)) else 0.0,
+                root_cause=r.get("Root Cause") or "",
+                status=r.get("Status") or "Open"
             )
             session.add(new_i)
             session.flush() # Get the new ID
-            issue_id_map[r.get("Issue ID")] = new_i.id
+            issue_id_map[str(r.get("Issue ID"))] = new_i.id
 
         # 3. Reload Email Logs
         email_id_map = {} # Sheets ID -> SQLite Object
-        # Note: In SheetsSync we use the local ID as the ID column in Sheets
         for r in data.get("emails", []):
-            # Find the link to the Issue ID string from the sheet
-            # We stored Issue IDs like 'AUD-20250401-001' in the 'Issue ID' col of Email Logs sheet
             linked_issue_id = None
-            if r.get("Issue ID") and r.get("Issue ID") != "N/A":
-                # We need to query again or use the map
-                # The issue_id_map maps Issue ID string -> SQLite primary key
-                linked_issue_id = issue_id_map.get(r.get("Issue ID"))
+            issue_id_str = str(r.get("Issue ID"))
+            if issue_id_str and issue_id_str != "N/A":
+                linked_issue_id = issue_id_map.get(issue_id_str)
 
             new_e = EmailLog(
                 id=r.get("ID"),
                 issue_id=linked_issue_id,
                 date_sent=r.get("Date Sent"),
-                recipient=r.get("Recipient"),
-                subject=r.get("Subject"),
-                email_summary=r.get("Summary"),
-                response_status=r.get("Status"),
+                recipient=r.get("Recipient") or "Unknown",
+                subject=r.get("Subject") or "No Subject",
+                email_summary=r.get("Summary") or "",
+                response_status=r.get("Status") or "No Response",
                 follow_up_date=r.get("Follow-up")
             )
             session.add(new_e)
@@ -147,15 +145,13 @@ def reload_from_sheets_data(data):
 
         # 4. Reload Responses
         for r in data.get("responses", []):
-            # Since we now have 'Email Log ID' in the sheets, we can link directly.
-            # However, we must ensure the local EmailLog exists with that ID.
             new_r = EmailResponse(
                 id=r.get("ID"),
                 email_log_id=r.get("Email Log ID"),
                 date=r.get("Date"),
-                direction=r.get("Direction"),
-                from_to=r.get("From/To"),
-                summary=r.get("Summary")
+                direction=r.get("Direction") or "Received",
+                from_to=r.get("From/To") or "Unknown",
+                summary=r.get("Summary") or ""
             )
             session.add(new_r)
 
