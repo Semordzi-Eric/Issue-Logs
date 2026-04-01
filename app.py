@@ -31,7 +31,7 @@ PAGES = [
 ]
 
 from database.sheets_sync import get_sheets_sync
-from database.models import reload_from_sheets_data, get_setting
+from database.models import reload_from_sheets_data, get_setting, get_session, Issue
 
 def main():
     # ── Bootstrap Sync from Google Sheets (Primary Database Logic) ──
