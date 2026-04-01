@@ -50,12 +50,13 @@ def _load_full_data():
 # ──────────────────────────────────────────────
 # WORD REPORT
 # ──────────────────────────────────────────────
-def generate_word_report(df: pd.DataFrame, month_year: str) -> bytes:
+def generate_word_report(df: pd.DataFrame, start_date: datetime.date, end_date: datetime.date) -> bytes:
     doc = Document()
+    period_str = f"{start_date} to {end_date}"
 
     # Title
-    title = doc.add_heading(f'Audit & Revenue Assurance Monthly Report', 0)
-    sub   = doc.add_paragraph(f'Period: {month_year}    |    Generated: {datetime.date.today()}')
+    title = doc.add_heading(f'Audit & Revenue Assurance Report', 0)
+    sub   = doc.add_paragraph(f'Period: {period_str}    |    Generated: {datetime.date.today()}')
     sub.runs[0].font.color.rgb = RGBColor(0x55, 0x60, 0x78)
     doc.add_paragraph()
 
@@ -72,7 +73,7 @@ def generate_word_report(df: pd.DataFrame, month_year: str) -> bytes:
     # ── 1. Executive Summary ──────────────────────
     doc.add_heading('1. Executive Summary', level=1)
     doc.add_paragraph(
-        f"During the month of {month_year}, the Audit & Revenue Assurance team logged a total of "
+        f"During the period of {period_str}, the Audit & Revenue Assurance team logged a total of "
         f"{total_issues} issue(s). Of these, {resolved} have been fully resolved, {investigating} are "
         f"under active investigation, {escalated} have been escalated, and {open_count} remain open. "
         f"The total estimated revenue impact for this period stands at GHS ₵{total_amount:,.2f}. "
@@ -184,8 +185,9 @@ def generate_word_report(df: pd.DataFrame, month_year: str) -> bytes:
 # ──────────────────────────────────────────────
 # PDF REPORT
 # ──────────────────────────────────────────────
-def generate_pdf_report(df: pd.DataFrame, month_year: str) -> bytes:
+def generate_pdf_report(df: pd.DataFrame, start_date: datetime.date, end_date: datetime.date) -> bytes:
     bio    = io.BytesIO()
+    period_str = f"{start_date} to {end_date}"
     doc    = SimpleDocTemplate(bio, pagesize=A4,
                                rightMargin=2*cm, leftMargin=2*cm,
                                topMargin=2*cm, bottomMargin=2*cm)
@@ -218,7 +220,7 @@ def generate_pdf_report(df: pd.DataFrame, month_year: str) -> bytes:
 
     # ── Cover ─────────────────────────────────────
     story.append(Paragraph("Audit & Revenue Assurance", TITLE_STYLE))
-    story.append(Paragraph(f"Monthly Report — {month_year}", HEAD1_STYLE))
+    story.append(Paragraph(f"Period: {period_str}", HEAD1_STYLE))
     story.append(Paragraph(f"Generated: {datetime.datetime.now().strftime('%d %B %Y %H:%M')}",
                             META_STYLE))
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#2E7D32')))
@@ -227,7 +229,7 @@ def generate_pdf_report(df: pd.DataFrame, month_year: str) -> bytes:
     # ── 1. Executive Summary ──────────────────────
     story.append(Paragraph("1. Executive Summary", HEAD1_STYLE))
     story.append(Paragraph(
-        f"During {month_year}, the team logged <b>{total_issues}</b> issue(s). "
+        f"During the period {period_str}, the team logged <b>{total_issues}</b> issue(s). "
         f"<b>{resolved}</b> resolved, <b>{investigating}</b> under investigation, "
         f"<b>{escalated}</b> escalated, <b>{open_count}</b> open. "
         f"Total estimated revenue impact: <b>GHS ₵{total_amount:,.2f}</b>. "
@@ -352,68 +354,82 @@ def render_reports():
         st.info("No audit data available. Log issues first.")
         return
 
-    df['Month-Year'] = df['Date'].dt.strftime('%B %Y')
-    available_months = sorted(df['Month-Year'].unique().tolist(),
-                              key=lambda m: pd.to_datetime(m, format='%B %Y'), reverse=True)
-
     st.subheader("📅 Select Reporting Period")
     c1, c2 = st.columns([2, 3])
     with c1:
-        selected_month = st.selectbox("Month", available_months)
-    month_df = df[df['Month-Year'] == selected_month]
+        # Default to last 30 days
+        today = datetime.date.today()
+        month_ago = today - datetime.timedelta(days=30)
+        
+        date_range = st.date_input(
+            "Select Range (Start to End)",
+            value=(month_ago, today),
+            help="Click once to select Start date, then once for End date."
+        )
+
+    # Only filter if a full range is selected
+    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+        start_date, end_date = date_range
+        mask = (df['Date'].dt.date >= start_date) & (df['Date'].dt.date <= end_date)
+        range_df = df[mask]
+        selected_period_label = f"{start_date} to {end_date}"
+    else:
+        st.warning("Please select both a Start and End date in the calendar.")
+        return
 
     # ── Preview KPIs ─────────────────────────────
-    st.markdown(f"#### 📊 Preview — {selected_month}")
+    st.markdown(f"#### 📊 Preview — {selected_period_label}")
     p1, p2, p3, p4, p5 = st.columns(5)
-    p1.metric("Total Issues",     len(month_df))
-    p2.metric("Resolved",         len(month_df[month_df['Status'] == 'Resolved']))
-    p3.metric("High / Critical",  len(month_df[month_df['Priority'].isin(['High', 'Critical'])]))
-    p4.metric("Revenue Impact",   f"₵{month_df['Amount'].sum():,.2f}")
-    p5.metric("Emails Sent",      int(month_df['Emails Sent'].sum()))
+    p1.metric("Total Issues",     len(range_df))
+    p2.metric("Resolved",         len(range_df[range_df['Status'] == 'Resolved']))
+    p3.metric("High / Critical",  len(range_df[range_df['Priority'].isin(['High', 'Critical'])]))
+    p4.metric("Revenue Impact",   f"₵{range_df['Amount'].sum():,.2f}")
+    p5.metric("Emails Sent",      int(range_df['Emails Sent'].sum()))
+
+    if range_df.empty:
+        st.info(f"No audit logs found for the selected range: {selected_period_label}")
+        return
 
     # ── Issue detail table ───────────────────────
-    with st.expander("📋 View Issue Data for this Month", expanded=False):
+    with st.expander("📋 View Issue Data for this Period", expanded=False):
         st.dataframe(
-            month_df[['Issue ID','Title','Category','Priority','Status','Amount','Emails Sent','Resolution']],
+            range_df[['Issue ID','Title','Category','Priority','Status','Amount','Emails Sent','Resolution']],
             hide_index=True,
             use_container_width=True
         )
 
     st.markdown("---")
     st.markdown("### 📥 Export Report")
-    st.markdown("All three formats contain full report sections including Executive Summary, Key Incidents, Revenue Analysis, and Recommendations.")
+    st.markdown("Full report sections including Executive Summary, Key Incidents, Revenue Analysis, and Recommendations.")
 
     with st.spinner("Preparing reports..."):
-        docx_data = generate_word_report(month_df, selected_month)
-        pdf_data  = generate_pdf_report(month_df, selected_month)
-        csv_data  = month_df.to_csv(index=False).encode('utf-8')
+        docx_data = generate_word_report(range_df, start_date, end_date)
+        pdf_data  = generate_pdf_report(range_df, start_date, end_date)
+        csv_data  = range_df.to_csv(index=False).encode('utf-8')
 
     exp_col1, exp_col2, exp_col3 = st.columns(3)
 
     with exp_col1:
         st.download_button(
-            label="📄 Download Word (DOCX)",
+            label="📄 Word (DOCX)",
             data=docx_data,
-            file_name=f"Audit_Report_{selected_month.replace(' ', '_')}.docx",
+            file_name=f"Audit_Report_{start_date}_to_{end_date}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             type="primary"
         )
-        st.caption("Full 9-section report with tables")
 
     with exp_col2:
         st.download_button(
-            label="📕 Download PDF",
+            label="📕 PDF Report",
             data=pdf_data,
-            file_name=f"Audit_Report_{selected_month.replace(' ', '_')}.pdf",
+            file_name=f"Audit_Report_{start_date}_to_{end_date}.pdf",
             mime="application/pdf"
         )
-        st.caption("Professionally styled A4 PDF")
 
     with exp_col3:
         st.download_button(
-            label="📊 Download Raw Data (CSV)",
+            label="📊 Raw Data (CSV)",
             data=csv_data,
-            file_name=f"Audit_Data_{selected_month.replace(' ', '_')}.csv",
+            file_name=f"Audit_Data_{start_date}_to_{end_date}.csv",
             mime="text/csv"
         )
-        st.caption("All issue data for this month")
