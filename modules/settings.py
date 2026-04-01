@@ -23,18 +23,29 @@ def render_settings():
         )
 
         st.markdown("#### 2. Service Account Credentials")
-        creds_exists = os.path.exists("service_account.json")
-        if creds_exists:
-            st.success("✅ `service_account.json` found in root directory.")
+        
+        # Check both local file and Streamlit secrets
+        file_exists = os.path.exists("service_account.json")
+        secrets_exists = False
+        try:
+            if "gcp_service_account" in st.secrets:
+                secrets_exists = True
+        except:
+            pass
+
+        if secrets_exists:
+            st.success("✅ **Cloud Secrets Detected**: `gcp_service_account` found in Streamlit Cloud.")
+        elif file_exists:
+            st.success("✅ **Local File Detected**: `service_account.json` found in root directory.")
         else:
-            st.error("❌ `service_account.json` not found.")
+            st.error("❌ **No Credentials Found**")
             st.info(
                 "💡 **How to set up:**  \n"
-                "1. Go to Google Cloud Console → Create a Service Account.  \n"
-                "2. Create a JSON Key and rename it to `service_account.json`.  \n"
-                "3. Place it in the `LOGS/` folder.  \n"
-                "4. **Crucial:** Share your Google Sheet with the Service Account email address."
+                "**Local:** Place `service_account.json` in the `LOGS/` folder.  \n"
+                "**Cloud:** Add your JSON content to Streamlit Cloud **Secrets** as `gcp_service_account`."
             )
+
+        creds_ready = file_exists or secrets_exists
 
         if st.button("💾 Save Configuration", type="primary"):
             st.session_state.gs_sheet_id = sheet_id
@@ -49,7 +60,7 @@ def render_settings():
 
     with col1:
         if st.button("🔌 Test Connection", use_container_width=True):
-            if not sheet_id or not creds_exists:
+            if not sheet_id or not creds_ready:
                 st.warning("Please complete the configuration first.")
             else:
                 with st.spinner("Testing connection..."):
