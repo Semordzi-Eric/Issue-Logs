@@ -4,6 +4,7 @@ import os
 import json
 import streamlit as st
 import datetime
+from database.models import get_setting
 
 # Scopes required for Google Sheets API
 SCOPES = [
@@ -95,9 +96,29 @@ class SheetsSync:
                 sheet.append_row(row_data)
         elif action == "DELETE":
             try:
+                # 1. Delete Issue
                 cell = sheet.find(str(issue.issue_id), in_column=2)
                 if cell:
                     sheet.delete_rows(cell.row)
+                
+                # 2. Cascading Delete: Email Logs
+                try:
+                    email_sheet = self.spreadsheet.worksheet("Email Logs")
+                    # Find all rows matched by Issue ID in column 2
+                    email_cells = email_sheet.findall(str(issue.issue_id), in_column=2)
+                    # Delete rows from bottom to top to avoid index shifting
+                    for c in sorted(email_cells, key=lambda x: x.row, reverse=True):
+                        email_sheet.delete_rows(c.row)
+                except gspread.exceptions.WorksheetNotFound: pass
+
+                # 3. Cascading Delete: Responses
+                try:
+                    resp_sheet = self.spreadsheet.worksheet("Responses")
+                    resp_cells = resp_sheet.findall(str(issue.issue_id), in_column=3) # Issue ID is col 3 in Responses
+                    for c in sorted(resp_cells, key=lambda x: x.row, reverse=True):
+                        resp_sheet.delete_rows(c.row)
+                except gspread.exceptions.WorksheetNotFound: pass
+
             except gspread.exceptions.CellNotFound:
                 pass
 
@@ -127,9 +148,19 @@ class SheetsSync:
                 sheet.append_row(row_data)
         elif action == "DELETE":
             try:
+                # 1. Delete Email Log
                 cell = sheet.find(str(email.id), in_column=1)
                 if cell:
                     sheet.delete_rows(cell.row)
+                
+                # 2. Cascading Delete: Responses (via Email Log ID)
+                try:
+                    resp_sheet = self.spreadsheet.worksheet("Responses")
+                    resp_cells = resp_sheet.findall(str(email.id), in_column=2) # Email Log ID is col 2
+                    for c in sorted(resp_cells, key=lambda x: x.row, reverse=True):
+                        resp_sheet.delete_rows(c.row)
+                except gspread.exceptions.WorksheetNotFound: pass
+
             except gspread.exceptions.CellNotFound:
                 pass
 
@@ -226,6 +257,11 @@ class SheetsSync:
         if resp_rows: resp_sheet.append_rows(resp_rows)
 
 def get_sheets_sync():
-    """Helper to get a SheetsSync instance from st.session_state configuration."""
-    sheet_id = st.session_state.get("gs_sheet_id", "")
+    """Helper to get a SheetsSync instance from persistent database config."""
+    # First priority: Database
+    sheet_id = get_setting("gs_sheet_id")
+    # Second priority: Session state (for migration/testing)
+    if not sheet_id:
+        sheet_id = st.session_state.get("gs_sheet_id", "")
+    
     return SheetsSync(sheet_id=sheet_id)

@@ -31,11 +31,16 @@ PAGES = [
 ]
 
 from database.sheets_sync import get_sheets_sync
-from database.models import reload_from_sheets_data
+from database.models import reload_from_sheets_data, get_setting
 
 def main():
     # ── Bootstrap Sync from Google Sheets (Primary Database Logic) ──
-    if "gs_sheet_id" in st.session_state and st.session_state.gs_sheet_id:
+    # Check both session and DB for Sheet ID
+    gs_id = get_setting("gs_sheet_id")
+    if not gs_id:
+        gs_id = st.session_state.get("gs_sheet_id")
+
+    if gs_id:
         if "gs_bootstrapped" not in st.session_state:
             with st.spinner("🔄 Bootstrapping from Google Sheets..."):
                 try:

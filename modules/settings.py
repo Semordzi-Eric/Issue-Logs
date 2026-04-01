@@ -2,7 +2,7 @@ import streamlit as st
 import os
 import json
 from database.sheets_sync import SheetsSync, get_sheets_sync
-from database.models import get_session, Issue, EmailLog, EmailResponse, reload_from_sheets_data
+from database.models import get_session, Issue, EmailLog, EmailResponse, reload_from_sheets_data, get_setting, set_setting
 
 def render_settings():
     st.title("⚙️ Settings & External Sync")
@@ -14,7 +14,11 @@ def render_settings():
     # ── Configuration Form ────────────────────────
     with st.expander("🛠️ API Configuration", expanded=True):
         st.markdown("#### 1. Spreadsheet ID")
-        current_id = st.session_state.get("gs_sheet_id", "")
+        
+        # Load from DB first
+        db_id = get_setting("gs_sheet_id")
+        current_id = db_id if db_id else st.session_state.get("gs_sheet_id", "")
+        
         sheet_id = st.text_input(
             "Enter Google Sheet ID*",
             value=current_id,
@@ -48,8 +52,11 @@ def render_settings():
         creds_ready = file_exists or secrets_exists
 
         if st.button("💾 Save Configuration", type="primary"):
+            # Save to DB for persistence
+            set_setting("gs_sheet_id", sheet_id)
+            # Sync to session state for current run
             st.session_state.gs_sheet_id = sheet_id
-            st.success("Configuration saved!")
+            st.success("Configuration saved and persisted!")
             st.rerun()
 
     st.markdown("---")

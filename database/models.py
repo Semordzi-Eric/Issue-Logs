@@ -52,6 +52,12 @@ class EmailResponse(Base):
     
     email_log = relationship("EmailLog", back_populates="responses")
 
+class SystemSetting(Base):
+    __tablename__ = 'system_settings'
+    
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+
 engine = create_engine('sqlite:///audit_logs.db')
 SessionLocal = sessionmaker(bind=engine)
 
@@ -60,6 +66,28 @@ def init_db():
 
 def get_session():
     return SessionLocal()
+
+def get_setting(key, default=None):
+    """Get a persistent setting from the database."""
+    session = SessionLocal()
+    try:
+        setting = session.query(SystemSetting).filter_by(key=key).first()
+        return setting.value if setting else default
+    finally:
+        session.close()
+
+def set_setting(key, value):
+    """Set a persistent setting in the database."""
+    session = SessionLocal()
+    try:
+        setting = session.query(SystemSetting).filter_by(key=key).first()
+        if setting:
+            setting.value = str(value)
+        else:
+            session.add(SystemSetting(key=key, value=str(value)))
+        session.commit()
+    finally:
+        session.close()
 
 def reload_from_sheets_data(data):
     """Wipe local DB and reload with data from Google Sheets."""
