@@ -257,10 +257,19 @@ class SheetsSync:
         if resp_rows: resp_sheet.append_rows(resp_rows)
 
 def get_sheets_sync():
-    """Helper to get a SheetsSync instance from persistent database config."""
-    # First priority: Database
-    sheet_id = get_setting("gs_sheet_id")
-    # Second priority: Session state (for migration/testing)
+    """Helper to get a SheetsSync instance, prioritizing Streamlit Secrets for persistence."""
+    # 1. Highest priority: Streamlit Secrets (Survives reboots)
+    sheet_id = None
+    try:
+        if "gs_sheet_id" in st.secrets:
+            sheet_id = st.secrets["gs_sheet_id"]
+    except: pass
+
+    # 2. Second priority: Database
+    if not sheet_id:
+        sheet_id = get_setting("gs_sheet_id")
+    
+    # 3. Third priority: Session state
     if not sheet_id:
         sheet_id = st.session_state.get("gs_sheet_id", "")
     

@@ -35,8 +35,15 @@ from database.models import reload_from_sheets_data, get_setting
 
 def main():
     # ── Bootstrap Sync from Google Sheets (Primary Database Logic) ──
-    # Check both session and DB for Sheet ID
-    gs_id = get_setting("gs_sheet_id")
+    # Check Secrets, Session, and DB for Sheet ID
+    gs_id = None
+    try:
+        if "gs_sheet_id" in st.secrets:
+            gs_id = st.secrets["gs_sheet_id"]
+    except: pass
+    
+    if not gs_id:
+        gs_id = get_setting("gs_sheet_id")
     if not gs_id:
         gs_id = st.session_state.get("gs_sheet_id")
 

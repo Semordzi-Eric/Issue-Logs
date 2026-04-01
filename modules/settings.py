@@ -15,16 +15,30 @@ def render_settings():
     with st.expander("🛠️ API Configuration", expanded=True):
         st.markdown("#### 1. Spreadsheet ID")
         
-        # Load from DB first
+        # Priority: Secrets > Database > Session
+        gs_id_from_secrets = None
+        try:
+            if "gs_sheet_id" in st.secrets:
+                gs_id_from_secrets = st.secrets["gs_sheet_id"]
+        except: pass
+
         db_id = get_setting("gs_sheet_id")
-        current_id = db_id if db_id else st.session_state.get("gs_sheet_id", "")
+        
+        if gs_id_from_secrets:
+            current_id = gs_id_from_secrets
+            st.success(f"✅ **Cloud ID Detected**: Using Sheet ID from Streamlit Secrets.")
+        else:
+            current_id = db_id if db_id else st.session_state.get("gs_sheet_id", "")
         
         sheet_id = st.text_input(
             "Enter Google Sheet ID*",
             value=current_id,
             help="The long string of characters in the Sheet URL after /d/",
             placeholder="e.g. 1aBC-dEf_GhIjKlMnOpQrStUvWxYz",
+            disabled=(gs_id_from_secrets is not None) # Disable input if using secrets
         )
+        if gs_id_from_secrets:
+            st.caption("💡 To change this, update `gs_sheet_id` in your Streamlit Cloud Secrets.")
 
         st.markdown("#### 2. Service Account Credentials")
         
