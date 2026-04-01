@@ -19,16 +19,35 @@ from modules.dashboard import render_dashboard
 from modules.issues import render_add_issue, render_manage_issues
 from modules.emails import render_email_tracker
 from modules.reports import render_reports
+from modules.settings import render_settings
 
 PAGES = [
     "📊 Dashboard Overview",
     "📝 Log New Issue",
     "🔍 Manage Issues",
     "📧 Email Tracker",
-    "📄 Generative Reports"
+    "📄 Generative Reports",
+    "⚙️ Settings & Sync"
 ]
 
+from database.sheets_sync import get_sheets_sync
+from database.models import reload_from_sheets_data
+
 def main():
+    # ── Bootstrap Sync from Google Sheets (Primary Database Logic) ──
+    if "gs_sheet_id" in st.session_state and st.session_state.gs_sheet_id:
+        if "gs_bootstrapped" not in st.session_state:
+            with st.spinner("🔄 Bootstrapping from Google Sheets..."):
+                try:
+                    sync = get_sheets_sync()
+                    data = sync.pull_all_data()
+                    if data:
+                        reload_from_sheets_data(data)
+                        st.session_state.gs_bootstrapped = True
+                        st.toast("✅ Synced with Cloud Database", icon="☁️")
+                except Exception as e:
+                    st.error(f"⚠️ Bootstrap Sync Failed: {e}")
+
     # ── Support programmatic navigation via session state ──
     if "nav_page" not in st.session_state:
         st.session_state.nav_page = PAGES[0]
@@ -68,6 +87,8 @@ def main():
         render_email_tracker()
     elif page == "📄 Generative Reports":
         render_reports()
+    elif page == "⚙️ Settings & Sync":
+        render_settings()
 
 
 if __name__ == "__main__":

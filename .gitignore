@@ -25,12 +25,20 @@ venv/
 ENV/
 
 # Streamlit
-.streamlit/secrets.toml
+.streamlit/
+! .streamlit/config.toml
 
 # Database files (local only — not for version control)
 *.db
 *.sqlite
 *.sqlite3
+audit_logs.db
+
+# 🔒 SENSITIVE: SECURITY CREDENTIALS (NEVER COMMIT THESE)
+service_account.json
+credentials.json
+*.json
+! .github/*.json
 
 # IDE / Editor
 .vscode/

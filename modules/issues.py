@@ -2,6 +2,7 @@ import streamlit as st
 import datetime
 import pandas as pd
 from database.models import get_session, Issue, EmailLog, EmailResponse
+from database.sheets_sync import get_sheets_sync
 from utils.helpers import generate_issue_id, predict_category
 
 CATEGORIES = [
@@ -211,6 +212,8 @@ def render_add_issue():
                     if "selected_template" in st.session_state:
                         del st.session_state["selected_template"]
                 st.success(f"✅ Issue **{iid}** logged!")
+                # ── Google Sheets Sync ──
+                get_sheets_sync().sync_issue(ni, action="INSERT")
                 st.toast(f"{iid} saved!", icon="⚡")
                 st.info("💡 Head to **Manage Issues** to add more details.")
 
@@ -279,6 +282,8 @@ def render_add_issue():
                     if "selected_template" in st.session_state:
                         del st.session_state["selected_template"]
                 st.success(f"✅ Issue **{iid}** logged successfully!")
+                # ── Google Sheets Sync ──
+                get_sheets_sync().sync_issue(new_issue, action="INSERT")
                 st.toast(f"Issue {iid} saved!", icon="✅")
                 st.info("💡 Head to **Manage Issues** to update or track emails for this issue.")
 
@@ -391,6 +396,8 @@ def render_manage_issues():
                 with st.spinner(f"Setting status to {label}..."):
                     target.status = skey
                     session.commit()
+                    # ── Google Sheets Sync ──
+                    get_sheets_sync().sync_issue(target, action="UPDATE")
                 st.toast(f"Status → {label}", icon=icon)
                 st.rerun()
 
@@ -438,6 +445,8 @@ def render_manage_issues():
             target.priority         = new_priority
             target.resolution_notes = resolution
             session.commit()
+            # ── Google Sheets Sync ──
+            get_sheets_sync().sync_issue(target, action="UPDATE")
         st.success(f"✅ {selected_id} updated successfully.")
         st.toast("Issue updated!", icon="💾")
         st.rerun()
@@ -455,6 +464,8 @@ def render_manage_issues():
                 session.delete(em)
             session.delete(target)
             session.commit()
+            # ── Google Sheets Sync ──
+            get_sheets_sync().sync_issue(target, action="DELETE")
         st.success(f"🗑️ Issue {selected_id} deleted.")
         st.toast("Issue deleted", icon="🗑️")
         st.rerun()
