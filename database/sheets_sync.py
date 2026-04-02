@@ -52,17 +52,25 @@ class SheetsSync:
             return False
 
     def ensure_headers(self):
-        """Ensure all required sheets and headers exist in the spreadsheet."""
-        for name, headers in self.REQUIRED_HEADERS.items():
+        """Ensure all required sheets and headers exist and match expected structure."""
+        if not self.spreadsheet: return
+        for name, expected in self.REQUIRED_HEADERS.items():
             try:
                 ws = self.spreadsheet.worksheet(name)
-                # Check if first row matches headers
-                first_row = ws.row_values(1)
-                if not first_row:
-                    ws.append_row(headers)
+                actual_headers = ws.row_values(1)
+                
+                # Check for missing headers
+                missing = [h for h in expected if h not in actual_headers]
+                if missing:
+                    # Append missing headers to the end of the existing row
+                    new_row = actual_headers + missing
+                    ws.update("A1", [new_row])
+                elif not actual_headers:
+                    ws.append_row(expected)
             except gspread.exceptions.WorksheetNotFound:
-                ws = self.spreadsheet.add_worksheet(title=name, rows="100", cols=str(len(headers)))
-                ws.append_row(headers)
+                # Create it with correct headers
+                ws = self.spreadsheet.add_worksheet(title=name, rows="100", cols=str(len(expected)))
+                ws.append_row(expected)
 
     def _get_or_create_worksheet(self, title, headers):
         """Get an existing worksheet or create it with headers if not found."""
@@ -188,6 +196,9 @@ class SheetsSync:
         """Fetch all data from Google Sheets to populate local SQLite."""
         if not self.connect(): return None
         
+        # Proactively ensure all required headers exist before pulling
+        self.ensure_headers()
+        
         data = {"issues": [], "emails": [], "responses": []}
         
         # Helper to safely parse dates
@@ -204,6 +215,7 @@ class SheetsSync:
         # 1. Pull Issues
         try:
             issues_sheet = self.spreadsheet.worksheet("Issues")
+            # Always ensure headers before pull to be robust
             rows = issues_sheet.get_all_records(expected_headers=self.REQUIRED_HEADERS["Issues"])
             for r in rows:
                 r["Date"] = safe_date(r.get("Date"))
