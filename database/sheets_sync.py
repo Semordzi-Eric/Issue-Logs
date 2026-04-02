@@ -16,7 +16,8 @@ class SheetsSync:
     REQUIRED_HEADERS = {
         "Issues": ["ID", "Issue ID", "Date", "Title", "Category", "Priority", "System", "Status", "Amount", "Root Cause", "Description", "Transaction ID"],
         "Email Logs": ["ID", "Issue ID", "Date Sent", "Recipient", "Subject", "Status", "Follow-up", "Summary"],
-        "Responses": ["ID", "Email Log ID", "Issue ID", "Date", "Direction", "From/To", "Summary"]
+        "Responses": ["ID", "Email Log ID", "Issue ID", "Date", "Direction", "From/To", "Summary"],
+        "Activities": ["ID", "Issue ID", "Date", "Status", "Priority", "Note"]
     }
 
     def __init__(self, credentials_path='service_account.json', sheet_id=None):
@@ -218,6 +219,27 @@ class SheetsSync:
             row_data = self._get_row_from_dict(sheet, data)
             sheet.append_row(row_data)
 
+    def sync_activity(self, activity, issue_id_str, action="INSERT"):
+        """Sync a manual issue activity log to the 'Activities' sheet."""
+        if not self.connect(): return
+        try:
+            sheet = self.spreadsheet.worksheet("Activities")
+        except: return
+        
+        if action == "INSERT":
+            data = {
+                "ID": activity.id, "Issue ID": issue_id_str, "Date": str(activity.date),
+                "Status": activity.status, "Priority": activity.priority, "Note": activity.note
+            }
+            row_data = self._get_row_from_dict(sheet, data)
+            sheet.append_row(row_data)
+        elif action == "DELETE":
+            try:
+                cell = sheet.find(str(activity.id), in_column=1)
+                if cell:
+                    sheet.delete_rows(cell.row)
+            except gspread.exceptions.CellNotFound: pass
+
     def pull_all_data(self):
         """Fetch all data from Google Sheets to populate local SQLite."""
         if not self.connect(): return None
@@ -225,7 +247,7 @@ class SheetsSync:
         # Proactively ensure all required headers exist before pulling
         self.ensure_headers()
         
-        data = {"issues": [], "emails": [], "responses": []}
+        data = {"issues": [], "emails": [], "responses": [], "activities": []}
         
         # Helper to safely parse dates
         def safe_date(val):
@@ -265,6 +287,15 @@ class SheetsSync:
             for r in rows:
                 r["Date"] = safe_date(r.get("Date"))
                 data["responses"].append(r)
+        except gspread.exceptions.WorksheetNotFound: pass
+
+        # 4. Pull Activities
+        try:
+            act_sheet = self.spreadsheet.worksheet("Activities")
+            rows = act_sheet.get_all_records(expected_headers=self.REQUIRED_HEADERS["Activities"])
+            for r in rows:
+                r["Date"] = safe_date(r.get("Date"))
+                data["activities"].append(r)
         except gspread.exceptions.WorksheetNotFound: pass
         
         # Record sync time for Dashboard
@@ -320,6 +351,20 @@ class SheetsSync:
             resp_rows.append(self._get_row_from_dict(resp_sheet, data))
         
         if resp_rows: resp_sheet.append_rows(resp_rows)
+
+        # Activities
+        act_sheet = self.spreadsheet.worksheet("Activities")
+        act_sheet.clear()
+        act_sheet.append_row(self.REQUIRED_HEADERS["Activities"])
+        act_rows = []
+        for i in all_issues:
+            for a in i.activities:
+                data = {
+                    "ID": a.id, "Issue ID": i.issue_id, "Date": str(a.date),
+                    "Status": a.status, "Priority": a.priority, "Note": a.note
+                }
+                act_rows.append(self._get_row_from_dict(act_sheet, data))
+        if act_rows: act_sheet.append_rows(act_rows)
 
 def get_sheets_sync():
     """Helper to get a SheetsSync instance, prioritizing Streamlit Secrets for persistence."""

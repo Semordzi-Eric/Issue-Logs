@@ -23,6 +23,8 @@ class Issue(Base):
     
     emails = relationship("EmailLog", back_populates="issue", 
                           cascade="all, delete-orphan")
+    activities = relationship("IssueActivity", back_populates="issue",
+                              cascade="all, delete-orphan", order_by="IssueActivity.date")
 
 class EmailLog(Base):
     __tablename__ = 'email_logs'
@@ -53,6 +55,18 @@ class EmailResponse(Base):
     summary = Column(Text, nullable=False)
     
     email_log = relationship("EmailLog", back_populates="responses")
+
+class IssueActivity(Base):
+    __tablename__ = 'issue_activities'
+    
+    id = Column(Integer, primary_key=True)
+    issue_id = Column(Integer, ForeignKey('issues.id'), nullable=False)
+    date = Column(Date, default=datetime.utcnow().date, nullable=False)
+    status = Column(String, nullable=False)
+    priority = Column(String, nullable=False)
+    note = Column(Text, nullable=False)
+    
+    issue = relationship("Issue", back_populates="activities")
 
 class SystemSetting(Base):
     __tablename__ = 'system_settings'
@@ -154,6 +168,22 @@ def reload_from_sheets_data(data):
                 summary=r.get("Summary") or ""
             )
             session.add(new_r)
+
+        # 5. Reload Activities
+        for r in data.get("activities", []):
+            issue_id_str = str(r.get("Issue ID"))
+            linked_issue_id = issue_id_map.get(issue_id_str)
+            if not linked_issue_id: continue # Sanity check
+
+            new_a = IssueActivity(
+                id=r.get("ID"),
+                issue_id=linked_issue_id,
+                date=r.get("Date"),
+                status=r.get("Status") or "Open",
+                priority=r.get("Priority") or "Medium",
+                note=r.get("Note") or ""
+            )
+            session.add(new_a)
 
         session.commit()
     except Exception as e:

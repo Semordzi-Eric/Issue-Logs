@@ -1,7 +1,7 @@
 import streamlit as st
 import datetime
 import pandas as pd
-from database.models import get_session, Issue, EmailLog, EmailResponse
+from database.models import get_session, Issue, EmailLog, EmailResponse, IssueActivity
 from database.sheets_sync import get_sheets_sync
 from utils.helpers import generate_issue_id, predict_category
 
@@ -440,67 +440,110 @@ def render_manage_issues():
 
     st.markdown("---")
 
-    # ── Full Update Form ─────────────────────────
-    st.markdown("### ✏️ Update Issue Details")
-    with st.form(f"update_issue_form{form_key_suffix}"):
-        u_col1, u_col2 = st.columns(2)
-        with u_col1:
-            new_title = st.text_input("Title*", value=target.title)
-            new_date  = st.date_input("Date*", value=target.date)
+    # ── Activity History Trail ───────────────────
+    st.markdown("### 📜 Update History / Trail")
+    st.caption("Chronological record of all manual updates and status changes for this issue.")
+    
+    activities = session.query(IssueActivity).filter_by(issue_id=target.id).order_by(IssueActivity.date.desc()).all()
+    
+    if not activities:
+        st.info("No activity updates logged yet.")
+    else:
+        for act in activities:
+            with st.expander(f"📌 {act.date} — {act.status} ({act.priority})", expanded=False):
+                st.markdown(act.note)
+                st.caption(f"Status: {act.status} | Priority: {act.priority}")
+
+    st.markdown("---")
+
+    # ── Log New Activity Update ──────────────────
+    st.markdown("### 📝 Log Activity Update")
+    st.info("Log a new development, phone call, or status change to keep the audit trail updated.")
+    
+    with st.form(f"log_activity_form{form_key_suffix}"):
+        l_col1, l_col2 = st.columns(2)
+        with l_col1:
             try:
                 status_idx = STATUSES.index(target.status)
             except:
                 status_idx = 0
-            new_status   = st.selectbox("Status",   STATUSES, index=status_idx)
-        with u_col2:
-            new_sys      = st.text_input("Affected System*", value=target.affected_system)
-            try:
-                cat_idx = CATEGORIES.index(target.category)
-            except:
-                cat_idx = 0
-            new_category = st.selectbox("Category*", CATEGORIES, index=cat_idx)
+            act_status = st.selectbox("Current Status", STATUSES, index=status_idx)
+        with l_col2:
             try:
                 prio_idx = PRIORITIES.index(target.priority)
             except:
-                prio_idx = 1 # Default to Medium
-            new_priority = st.selectbox("Priority", PRIORITIES, index=prio_idx)
-
-        new_desc = st.text_area("Issue Description", value=target.description or "", height=100)
+                prio_idx = 1
+            act_prio = st.selectbox("Current Priority", PRIORITIES, index=prio_idx)
         
-        u_col3, u_col4 = st.columns(2)
-        with u_col3:
-            new_txn = st.text_input("Transaction ID", value=target.transaction_id or "")
-        with u_col4:
-            new_amt = st.number_input("Amount (₵)", value=float(target.amount or 0), step=10.0)
-
-        new_root = st.text_input("Root Cause", value=target.root_cause or "")
-        resolution = st.text_area("Resolution Notes / Update Details",
-                                  value=target.resolution_notes or "")
+        act_note = st.text_area("Update Note / Activity Detail*", placeholder="e.g., Spoke to vendor, they verified the logs and found a timeout...", height=100)
         
-        update_submitted = st.form_submit_button("💾 Save All Updates", type="primary")
+        act_submitted = st.form_submit_button("📝 Log Update to Trail", type="primary")
 
-    if update_submitted:
-        if not new_title or not new_sys or not new_desc:
-            st.error("❌ Title, System, and Description are required.")
+    if act_submitted:
+        if not act_note:
+            st.error("❌ Update note is required to log an activity.")
         else:
-            with st.spinner("Saving..."):
-                target.title           = new_title
-                target.date            = new_date
-                target.affected_system = new_sys
-                target.category        = new_category
-                target.description     = new_desc
-                target.transaction_id  = new_txn if new_txn else None
-                target.amount          = new_amt if new_amt > 0 else None
-                target.root_cause      = new_root if new_root else None
-                target.status           = new_status
-                target.priority         = new_priority
-                target.resolution_notes = resolution
+            with st.spinner("Logging activity..."):
+                # 1. Create Activity Record
+                new_act = IssueActivity(
+                    issue_id=target.id,
+                    date=datetime.date.today(),
+                    status=act_status,
+                    priority=act_prio,
+                    note=act_note
+                )
+                session.add(new_act)
+                
+                # 2. Update Issue State
+                target.status = act_status
+                target.priority = act_prio
                 session.commit()
-                # ── Google Sheets Sync ──
+                
+                # 3. Sync to Google Sheets
+                sync = get_sheets_sync()
+                sync.sync_issue(target, action="UPDATE")
+                sync.sync_activity(new_act, target.issue_id, action="INSERT")
+                
+                st.session_state.form_reset_id += 1
+            st.success(f"✅ Activity logged to trail for {selected_id}")
+            st.toast("Activity recorded!", icon="📝")
+            st.rerun()
+
+    # ── Edit Core Details (Optional Corrections) ─
+    st.markdown("---")
+    with st.expander("✏️ Correct Core Issue Details", expanded=False):
+        st.caption("Use this only to fix errors in the original log (Title, System, Category, etc.)")
+        with st.form(f"correct_issue_form{form_key_suffix}"):
+            c_col1, c_col2 = st.columns(2)
+            with c_col1:
+                c_title = st.text_input("Title", value=target.title)
+                c_date  = st.date_input("Date", value=target.date)
+                c_sys   = st.text_input("System", value=target.affected_system)
+            with c_col2:
+                try: cat_idx = CATEGORIES.index(target.category); except: cat_idx = 0
+                c_cat   = st.selectbox("Category", CATEGORIES, index=cat_idx)
+                c_txn   = st.text_input("Transaction ID", value=target.transaction_id or "")
+                c_amt   = st.number_input("Amount (₵)", value=float(target.amount or 0), step=10.0)
+            
+            c_desc = st.text_area("Original Description", value=target.description or "")
+            c_root = st.text_input("Root Cause", value=target.root_cause or "")
+            
+            c_submitted = st.form_submit_button("💾 Save Core Corrections")
+            
+        if c_submitted:
+            with st.spinner("Saving corrections..."):
+                target.title = c_title
+                target.date = c_date
+                target.affected_system = c_sys
+                target.category = c_cat
+                target.transaction_id = c_txn if c_txn else None
+                target.amount = c_amt if c_amt > 0 else None
+                target.description = c_desc
+                target.root_cause = c_root
+                session.commit()
                 get_sheets_sync().sync_issue(target, action="UPDATE")
                 st.session_state.form_reset_id += 1
-            st.success(f"✅ {selected_id} updated successfully.")
-            st.toast("Issue updated!", icon="💾")
+            st.success("✅ Core details updated.")
             st.rerun()
 
     # ── Delete ───────────────────────────────────
