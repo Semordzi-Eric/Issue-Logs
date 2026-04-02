@@ -116,6 +116,11 @@ def render_add_issue():
     st.title("📝 Log New Audit Issue")
     st.markdown("---")
 
+    # Initialize form reset key tracker
+    if "form_reset_id" not in st.session_state:
+        st.session_state.form_reset_id = 0
+    form_key_suffix = f"_{st.session_state.form_reset_id}"
+
     # ── Quick-Log Template Buttons ───────────────
     st.markdown("#### ⚡ Quick Templates — Click to Pre-fill the Form")
     st.caption("Select a template to auto-fill all fields. You can edit before submitting.")
@@ -160,7 +165,7 @@ def render_add_issue():
     if fast_mode:
         # ── FAST ENTRY FORM ──────────────────────
         st.markdown("##### 🚀 Fast Entry — Essential Fields Only")
-        with st.form("fast_issue_form"):
+        with st.form(f"fast_issue_form{form_key_suffix}"):
             fast_title  = st.text_input("Issue Title*", value=tpl_data.get("title", ""))
             f_col1, f_col2, f_col3 = st.columns(3)
             with f_col1:
@@ -208,9 +213,10 @@ def render_add_issue():
                     iid = ni.issue_id
                     session.close()
                     _save_field_memory(fast_sys, fast_prio, fast_cat)
-                    # Clear template after use
+                    # Clear template and trigger form reset
                     if "selected_template" in st.session_state:
                         del st.session_state["selected_template"]
+                    st.session_state.form_reset_id += 1
                 st.success(f"✅ Issue **{iid}** logged!")
                 # ── Google Sheets Sync ──
                 get_sheets_sync().sync_issue(ni, action="INSERT")
@@ -220,7 +226,7 @@ def render_add_issue():
     else:
         # ── FULL ENTRY FORM ──────────────────────
         st.markdown("##### 📋 Full Issue Form")
-        with st.form("new_issue_form"):
+        with st.form(f"new_issue_form{form_key_suffix}"):
             col1, col2 = st.columns(2)
             with col1:
                 title = st.text_input("Issue Title*", value=tpl_data.get("title", ""),
@@ -281,11 +287,14 @@ def render_add_issue():
                     _save_field_memory(affected_system, priority, category)
                     if "selected_template" in st.session_state:
                         del st.session_state["selected_template"]
+                    st.session_state.form_reset_id += 1
                 st.success(f"✅ Issue **{iid}** logged successfully!")
                 # ── Google Sheets Sync ──
                 get_sheets_sync().sync_issue(new_issue, action="INSERT")
                 st.toast(f"Issue {iid} saved!", icon="✅")
                 st.info("💡 Head to **Manage Issues** to update or track emails for this issue.")
+                # Force rerun to finish the clear cycle immediately
+                st.rerun()
 
 
 # ──────────────────────────────────────────────
