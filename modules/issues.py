@@ -430,11 +430,17 @@ def render_manage_issues():
     with st.form("update_issue_form"):
         u_col1, u_col2 = st.columns(2)
         with u_col1:
-            new_status   = st.selectbox("Status",   STATUSES,
-                                        index=STATUSES.index(target.status))
+            try:
+                status_idx = STATUSES.index(target.status)
+            except:
+                status_idx = 0
+            new_status   = st.selectbox("Status",   STATUSES, index=status_idx)
         with u_col2:
-            new_priority = st.selectbox("Priority", PRIORITIES,
-                                        index=PRIORITIES.index(target.priority))
+            try:
+                prio_idx = PRIORITIES.index(target.priority)
+            except:
+                prio_idx = 1 # Default to Medium
+            new_priority = st.selectbox("Priority", PRIORITIES, index=prio_idx)
         resolution = st.text_area("Resolution Notes / Update Details",
                                   value=target.resolution_notes or "")
         update_submitted = st.form_submit_button("💾 Save All Updates", type="primary")
