@@ -83,18 +83,37 @@ class SheetsSync:
             sheet.format("A1:Z1", {"textFormat": {"bold": True}})
         return sheet
 
+    def _get_row_from_dict(self, ws, data_dict):
+        """Construct a row list matching the worksheet's actual header order."""
+        try:
+            actual_headers = ws.row_values(1)
+            # If empty, use our canonical ones as fallback
+            if not actual_headers:
+                actual_headers = self.REQUIRED_HEADERS.get(ws.title, [])
+            
+            row = []
+            for h in actual_headers:
+                row.append(data_dict.get(h, ""))
+            return row
+        except Exception:
+            # Fallback to static list if header fetch fails
+            return list(data_dict.values())
+
     def sync_issue(self, issue, action="INSERT"):
-        """Sync an issue record to the 'Issues' sheet."""
+        """Sync an issue record to the 'Issues' sheet with robust mapping."""
         if not self.connect(): return
         try:
             sheet = self.spreadsheet.worksheet("Issues")
         except: return
         
-        row_data = [
-            issue.id, issue.issue_id, str(issue.date), issue.title, issue.description or "", 
-            issue.category, issue.priority, issue.affected_system, 
-            issue.transaction_id or "", issue.amount or 0, issue.root_cause or "", issue.status
-        ]
+        data = {
+            "ID": issue.id, "Issue ID": issue.issue_id, "Date": str(issue.date), 
+            "Title": issue.title, "Description": issue.description or "", 
+            "Category": issue.category, "Priority": issue.priority, "System": issue.affected_system, 
+            "Transaction ID": issue.transaction_id or "", "Amount": issue.amount or 0, 
+            "Root Cause": issue.root_cause or "", "Status": issue.status
+        }
+        row_data = self._get_row_from_dict(sheet, data)
 
         if action == "INSERT":
             sheet.append_row(row_data)
@@ -102,7 +121,8 @@ class SheetsSync:
             try:
                 cell = sheet.find(str(issue.issue_id), in_column=2)
                 if cell:
-                    sheet.update(f"A{cell.row}:L{cell.row}", [row_data])
+                    # Update row (dynamic column mapping handles position)
+                    sheet.update(f"A{cell.row}", [row_data])
                 else:
                     sheet.append_row(row_data)
             except gspread.exceptions.CellNotFound:
@@ -136,27 +156,31 @@ class SheetsSync:
                 pass
 
     def sync_email(self, email, issue_id_str, action="INSERT"):
-        """Sync an email log (and its responses if deleting) to the 'Email Logs' sheet."""
+        """Sync an email log to the 'Email Logs' sheet with robust mapping."""
         if not self.connect(): return
         try:
             sheet = self.spreadsheet.worksheet("Email Logs")
         except: return
         
         if action == "INSERT":
-            row_data = [
-                email.id, issue_id_str, str(email.date_sent), 
-                email.recipient, email.subject, email.response_status,
-                str(email.follow_up_date) if email.follow_up_date else "",
-                email.email_summary
-            ]
+            data = {
+                "ID": email.id, "Issue ID": issue_id_str, "Date Sent": str(email.date_sent), 
+                "Recipient": email.recipient, "Subject": email.subject, "Status": email.response_status,
+                "Follow-up": str(email.follow_up_date) if email.follow_up_date else "",
+                "Summary": email.email_summary
+            }
+            row_data = self._get_row_from_dict(sheet, data)
             sheet.append_row(row_data)
         elif action == "UPDATE":
             try:
                 cell = sheet.find(str(email.id), in_column=1)
                 if cell:
-                    # Update status and follow-up (cols 6 and 7)
-                    sheet.update_cell(cell.row, 6, email.response_status)
-                    sheet.update_cell(cell.row, 7, str(email.follow_up_date) if email.follow_up_date else "")
+                    # Map headers for partial update
+                    headers = sheet.row_values(1)
+                    if "Status" in headers:
+                        sheet.update_cell(cell.row, headers.index("Status") + 1, email.response_status)
+                    if "Follow-up" in headers:
+                        sheet.update_cell(cell.row, headers.index("Follow-up") + 1, str(email.follow_up_date) if email.follow_up_date else "")
             except gspread.exceptions.CellNotFound:
                 # If not found, insert as fallback
                 self.sync_email(email, issue_id_str, action="INSERT")
@@ -179,17 +203,19 @@ class SheetsSync:
                 pass
 
     def sync_response(self, response, issue_id_str, action="INSERT"):
-        """Sync an email response to the 'Responses' sheet."""
+        """Sync an email response to the 'Responses' sheet with robust mapping."""
         if not self.connect(): return
         try:
             sheet = self.spreadsheet.worksheet("Responses")
         except: return
         
         if action == "INSERT":
-            row_data = [
-                response.id, response.email_log_id, issue_id_str,
-                str(response.date), response.direction, response.from_to, response.summary
-            ]
+            data = {
+                "ID": response.id, "Email Log ID": response.email_log_id, "Issue ID": issue_id_str,
+                "Date": str(response.date), "Direction": response.direction, 
+                "From/To": response.from_to, "Summary": response.summary
+            }
+            row_data = self._get_row_from_dict(sheet, data)
             sheet.append_row(row_data)
 
     def pull_all_data(self):
@@ -250,34 +276,49 @@ class SheetsSync:
         if not self.connect(): return
 
         # Issues
-        issues_headers = ["ID", "Issue ID", "Date", "Title", "Description", "Category", "Priority", "System", "Transaction ID", "Amount", "Root Cause", "Status"]
         issues_sheet = self.spreadsheet.worksheet("Issues")
         issues_sheet.clear()
-        issues_sheet.append_row(issues_headers)
-        issue_rows = [
-            [i.id, i.issue_id, str(i.date), i.title, i.description or "", 
-             i.category, i.priority, i.affected_system, 
-             i.transaction_id or "", i.amount or 0, i.root_cause or "", i.status] 
-            for i in all_issues
-        ]
+        issues_sheet.append_row(self.REQUIRED_HEADERS["Issues"])
+        issue_rows = []
+        for i in all_issues:
+            data = {
+                "ID": i.id, "Issue ID": i.issue_id, "Date": str(i.date), 
+                "Title": i.title, "Description": i.description or "", 
+                "Category": i.category, "Priority": i.priority, "System": i.affected_system, 
+                "Transaction ID": i.transaction_id or "", "Amount": i.amount or 0, 
+                "Root Cause": i.root_cause or "", "Status": i.status
+            }
+            issue_rows.append(self._get_row_from_dict(issues_sheet, data))
+        
         if issue_rows: issues_sheet.append_rows(issue_rows)
 
         # Email Logs
-        emails_headers = ["ID", "Issue ID", "Date Sent", "Recipient", "Subject", "Status", "Follow-up", "Summary"]
         emails_sheet = self.spreadsheet.worksheet("Email Logs")
         emails_sheet.clear()
-        emails_sheet.append_row(emails_headers)
-        email_rows = [[e.id, issue_map.get(e.issue_id, "N/A"), str(e.date_sent), e.recipient, e.subject, e.response_status, str(e.follow_up_date or ""), e.email_summary] for e in all_emails]
+        emails_sheet.append_row(self.REQUIRED_HEADERS["Email Logs"])
+        email_rows = []
+        for e in all_emails:
+            data = {
+                "ID": e.id, "Issue ID": issue_map.get(e.issue_id, "N/A"), "Date Sent": str(e.date_sent), 
+                "Recipient": e.recipient, "Subject": e.subject, "Status": e.response_status, 
+                "Follow-up": str(e.follow_up_date or ""), "Summary": e.email_summary
+            }
+            email_rows.append(self._get_row_from_dict(emails_sheet, data))
+            
         if email_rows: emails_sheet.append_rows(email_rows)
 
         # Responses
-        resp_headers = ["ID", "Email Log ID", "Issue ID", "Date", "Direction", "From/To", "Summary"]
         resp_sheet = self.spreadsheet.worksheet("Responses")
         resp_sheet.clear()
-        resp_sheet.append_row(resp_headers)
+        resp_sheet.append_row(self.REQUIRED_HEADERS["Responses"])
         resp_rows = []
         for r in all_responses:
-            resp_rows.append([r.id, r.email_log_id, issue_map.get(r.email_log_id, "N/A"), str(r.date), r.direction, r.from_to, r.summary])
+            data = {
+                "ID": r.id, "Email Log ID": r.email_log_id, "Issue ID": issue_map.get(r.email_log_id, "N/A"), 
+                "Date": str(r.date), "Direction": r.direction, "From/To": r.from_to, "Summary": r.summary
+            }
+            resp_rows.append(self._get_row_from_dict(resp_sheet, data))
+        
         if resp_rows: resp_sheet.append_rows(resp_rows)
 
 def get_sheets_sync():
