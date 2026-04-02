@@ -14,7 +14,7 @@ SCOPES = [
 
 class SheetsSync:
     REQUIRED_HEADERS = {
-        "Issues": ["ID", "Issue ID", "Date", "Title", "Description", "Category", "Priority", "System", "Transaction ID", "Amount", "Root Cause", "Status"],
+        "Issues": ["ID", "Issue ID", "Date", "Title", "Category", "Priority", "System", "Status", "Amount", "Root Cause", "Description", "Transaction ID"],
         "Email Logs": ["ID", "Issue ID", "Date Sent", "Recipient", "Subject", "Status", "Follow-up", "Summary"],
         "Responses": ["ID", "Email Log ID", "Issue ID", "Date", "Direction", "From/To", "Summary"]
     }
