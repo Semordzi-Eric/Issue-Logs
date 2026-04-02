@@ -302,6 +302,12 @@ def render_add_issue():
 # ──────────────────────────────────────────────
 def render_manage_issues():
     st.title("🔍 Manage & Filter Issues")
+    
+    # Initialize form reset key tracker
+    if "form_reset_id" not in st.session_state:
+        st.session_state.form_reset_id = 0
+    form_key_suffix = f"_{st.session_state.form_reset_id}"
+
     st.markdown(
         "View, filter, and update issues. "
         "Click **📧 Open Email Trail** to manage communications in Email Tracker."
@@ -436,35 +442,66 @@ def render_manage_issues():
 
     # ── Full Update Form ─────────────────────────
     st.markdown("### ✏️ Update Issue Details")
-    with st.form("update_issue_form"):
+    with st.form(f"update_issue_form{form_key_suffix}"):
         u_col1, u_col2 = st.columns(2)
         with u_col1:
+            new_title = st.text_input("Title*", value=target.title)
+            new_date  = st.date_input("Date*", value=target.date)
             try:
                 status_idx = STATUSES.index(target.status)
             except:
                 status_idx = 0
             new_status   = st.selectbox("Status",   STATUSES, index=status_idx)
         with u_col2:
+            new_sys      = st.text_input("Affected System*", value=target.affected_system)
+            try:
+                cat_idx = CATEGORIES.index(target.category)
+            except:
+                cat_idx = 0
+            new_category = st.selectbox("Category*", CATEGORIES, index=cat_idx)
             try:
                 prio_idx = PRIORITIES.index(target.priority)
             except:
                 prio_idx = 1 # Default to Medium
             new_priority = st.selectbox("Priority", PRIORITIES, index=prio_idx)
+
+        new_desc = st.text_area("Issue Description", value=target.description or "", height=100)
+        
+        u_col3, u_col4 = st.columns(2)
+        with u_col3:
+            new_txn = st.text_input("Transaction ID", value=target.transaction_id or "")
+        with u_col4:
+            new_amt = st.number_input("Amount (₵)", value=float(target.amount or 0), step=10.0)
+
+        new_root = st.text_input("Root Cause", value=target.root_cause or "")
         resolution = st.text_area("Resolution Notes / Update Details",
                                   value=target.resolution_notes or "")
+        
         update_submitted = st.form_submit_button("💾 Save All Updates", type="primary")
 
     if update_submitted:
-        with st.spinner("Saving..."):
-            target.status           = new_status
-            target.priority         = new_priority
-            target.resolution_notes = resolution
-            session.commit()
-            # ── Google Sheets Sync ──
-            get_sheets_sync().sync_issue(target, action="UPDATE")
-        st.success(f"✅ {selected_id} updated successfully.")
-        st.toast("Issue updated!", icon="💾")
-        st.rerun()
+        if not new_title or not new_sys or not new_desc:
+            st.error("❌ Title, System, and Description are required.")
+        else:
+            with st.spinner("Saving..."):
+                target.title           = new_title
+                target.date            = new_date
+                target.affected_system = new_sys
+                target.category        = new_category
+                target.description     = new_desc
+                target.transaction_id  = new_txn if new_txn else None
+                target.amount          = new_amt if new_amt > 0 else None
+                target.root_cause      = new_root if new_root else None
+                target.status           = new_status
+                target.priority         = new_priority
+                target.resolution_notes = resolution
+                session.commit()
+                # ── Google Sheets Sync ──
+                get_sheets_sync().sync_issue(target, action="UPDATE")
+                st.session_state.form_reset_id += 1
+            st.success(f"✅ {selected_id} updated successfully.")
+            st.toast("Issue updated!", icon="💾")
+            st.rerun()
 
     # ── Delete ───────────────────────────────────
     st.markdown("---")
