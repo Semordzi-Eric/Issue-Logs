@@ -13,6 +13,12 @@ SCOPES = [
 ]
 
 class SheetsSync:
+    REQUIRED_HEADERS = {
+        "Issues": ["ID", "Issue ID", "Date", "Title", "Description", "Category", "Priority", "System", "Transaction ID", "Amount", "Root Cause", "Status"],
+        "Email Logs": ["ID", "Issue ID", "Date Sent", "Recipient", "Subject", "Status", "Follow-up", "Summary"],
+        "Responses": ["ID", "Email Log ID", "Issue ID", "Date", "Direction", "From/To", "Summary"]
+    }
+
     def __init__(self, credentials_path='service_account.json', sheet_id=None):
         self.credentials_path = credentials_path
         self.sheet_id = sheet_id
@@ -47,12 +53,7 @@ class SheetsSync:
 
     def ensure_headers(self):
         """Ensure all required sheets and headers exist in the spreadsheet."""
-        required = {
-            "Issues": ["ID", "Issue ID", "Date", "Title", "Description", "Category", "Priority", "System", "Transaction ID", "Amount", "Root Cause", "Status"],
-            "Email Logs": ["ID", "Issue ID", "Date Sent", "Recipient", "Subject", "Status", "Follow-up", "Summary"],
-            "Responses": ["ID", "Email Log ID", "Issue ID", "Date", "Direction", "From/To", "Summary"]
-        }
-        for name, headers in required.items():
+        for name, headers in self.REQUIRED_HEADERS.items():
             try:
                 ws = self.spreadsheet.worksheet(name)
                 # Check if first row matches headers
@@ -203,7 +204,7 @@ class SheetsSync:
         # 1. Pull Issues
         try:
             issues_sheet = self.spreadsheet.worksheet("Issues")
-            rows = issues_sheet.get_all_records()
+            rows = issues_sheet.get_all_records(expected_headers=self.REQUIRED_HEADERS["Issues"])
             for r in rows:
                 r["Date"] = safe_date(r.get("Date"))
                 data["issues"].append(r)
@@ -212,7 +213,7 @@ class SheetsSync:
         # 2. Pull Email Logs
         try:
             emails_sheet = self.spreadsheet.worksheet("Email Logs")
-            rows = emails_sheet.get_all_records()
+            rows = emails_sheet.get_all_records(expected_headers=self.REQUIRED_HEADERS["Email Logs"])
             for r in rows:
                 r["Date Sent"] = safe_date(r.get("Date Sent"))
                 r["Follow-up"] = safe_date(r.get("Follow-up"))
@@ -222,7 +223,7 @@ class SheetsSync:
         # 3. Pull Responses
         try:
             resp_sheet = self.spreadsheet.worksheet("Responses")
-            rows = resp_sheet.get_all_records()
+            rows = resp_sheet.get_all_records(expected_headers=self.REQUIRED_HEADERS["Responses"])
             for r in rows:
                 r["Date"] = safe_date(r.get("Date"))
                 data["responses"].append(r)
