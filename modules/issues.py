@@ -520,7 +520,10 @@ def render_manage_issues():
                 c_date  = st.date_input("Date", value=target.date)
                 c_sys   = st.text_input("System", value=target.affected_system)
             with c_col2:
-                try: cat_idx = CATEGORIES.index(target.category); except: cat_idx = 0
+                try:
+                    cat_idx = CATEGORIES.index(target.category)
+                except ValueError:
+                    cat_idx = 0
                 c_cat   = st.selectbox("Category", CATEGORIES, index=cat_idx)
                 c_txn   = st.text_input("Transaction ID", value=target.transaction_id or "")
                 c_amt   = st.number_input("Amount (₵)", value=float(target.amount or 0), step=10.0)
