@@ -112,6 +112,7 @@ def reload_from_sheets_data(data):
         # 1. Clear everything
         session.query(EmailResponse).delete()
         session.query(EmailLog).delete()
+        session.query(IssueActivity).delete()
         session.query(Issue).delete()
         session.commit()
 
